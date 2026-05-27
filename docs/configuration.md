@@ -60,7 +60,7 @@ servers:
 
 ## servers.d Overlays
 
-`mcpgateway install` and `mcpgateway import-clients --write` write one file per server:
+`mcpgateway add` and `mcpgateway import-clients --write` write one file per server:
 
 ```yaml
 id: docs

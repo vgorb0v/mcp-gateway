@@ -58,6 +58,7 @@ pub(crate) fn run_demo(options: DemoOptions) -> Result<()> {
         skip_launchctl: true,
         add_to_path: false,
         no_path_prompt: true,
+        homebrew: false,
         home: home.clone(),
     })?;
 

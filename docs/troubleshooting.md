@@ -9,13 +9,23 @@ mcpgateway ps
 
 ## Gateway Not Running
 
+For Homebrew installs:
+
+```bash
+brew services info mcp-gateway
+brew services restart mcp-gateway
+tail -n 100 ~/.mcp-gateway/logs/gateway.err.log
+```
+
+For standalone release or source installs:
+
 ```bash
 launchctl print gui/$UID/io.github.mcpgateway.daemon
 tail -n 100 ~/.mcp-gateway/logs/gateway.err.log
-target/release/mcpgateway install-native
+target/release/mcpgateway install
 ```
 
-If the old private label exists, reinstalling unloads and removes its plist best-effort.
+If the old private label exists, reinstalling unloads and removes its plist best-effort. Homebrew installs remove the manual MCP Gateway plist during provisioning and rely on `brew services start/stop mcp-gateway`.
 
 ## Capability Cache Missing
 
@@ -47,8 +57,10 @@ mcpgateway stop all
 rm -f ~/.mcp-gateway/run/state.json
 rm -f ~/.mcp-gateway/cache/mcp_manifest_cache.json
 mcpgateway refresh-capabilities all
-target/release/mcpgateway install-native
+brew services restart mcp-gateway
 ```
+
+For standalone installs, replace the final line with `target/release/mcpgateway install`.
 
 Do not delete `~/.mcp-gateway/config/` unless you intentionally want to remove server and client configuration.
 

@@ -33,7 +33,7 @@ servers:
   # Optional browser-style recipe:
   #
   # 1. Provision an AI-only browser:
-  #      mcpgateway install-native --provision chrome-for-testing
+  #      mcpgateway install --provision chrome-for-testing
   # 2. Install the MCP package you want:
   #      mcpgateway install @scope/browser-mcp --name browser-tools
   # 3. Uncomment and adapt this server entry.

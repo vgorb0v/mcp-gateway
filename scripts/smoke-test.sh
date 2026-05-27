@@ -8,7 +8,7 @@ trap 'rm -rf "$tmp_home"' EXIT
 cd "$repo_root"
 cargo build --release --workspace --bins
 
-target/release/mcpgateway install-native \
+target/release/mcpgateway install \
   --home "$tmp_home" \
   --skip-launchctl \
   --skip-pnpm-install \

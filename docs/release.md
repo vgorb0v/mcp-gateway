@@ -1,6 +1,6 @@
 # Release Process
 
-MCP Gateway currently publishes GitHub release artifacts only. Crates are marked `publish = false` until a crates.io strategy is explicitly chosen.
+MCP Gateway publishes GitHub release artifacts and updates the custom Homebrew tap. Crates are marked `publish = false` until a crates.io strategy is explicitly chosen.
 
 The repository pins Rust `1.95.0` in `rust-toolchain.toml`, workspace package metadata, and CI. Treat that as the current MSRV until intentionally changed.
 
@@ -35,12 +35,14 @@ The release workflow builds:
 
 Each archive contains `mcp-gateway`, `mcp-gateway-bridge`, `mcpgateway`, `README.md`, and `LICENSE`. `SHA256SUMS` is generated for the archives.
 
+The tap workflow updates `vgorb0v/homebrew-tap` on published releases. It expects `HOMEBREW_TAP_TOKEN` to have write access to that repository.
+
 ## Signing and Notarization
 
 Release binaries are not signed or notarized yet. Do not claim otherwise in release notes.
 
-Future work may add signed artifacts, notarization, and a Homebrew tap.
+Future work may add signed artifacts and notarization.
 
 ## Rollback
 
-If a release is bad, publish a new patch release. Existing users can rerun `mcpgateway install-native` with the replacement binaries; config and backend overlays are preserved.
+If a release is bad, publish a new patch release. Homebrew users can run `brew upgrade mcp-gateway` and standalone users can rerun `mcpgateway install` with the replacement binaries; config and backend overlays are preserved.

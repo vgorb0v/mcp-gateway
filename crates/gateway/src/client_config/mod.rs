@@ -74,7 +74,7 @@ pub fn apply_configs(options: ApplyConfigOptions) -> Result<Vec<PathBuf>> {
     // Production path: route through the reconciler so every legacy caller
     // gets named backups + manifest tracking for free. The reconciler picks
     // up paths from `NativeInstallPaths::for_home(&options.home)` so behavior
-    // matches `install-native` even when callers pass custom mcp_dir/state.
+    // matches `mcpgateway install` even when callers pass custom mcp_dir/state.
     let paths = NativeInstallPaths::for_home(&options.home);
     let reconciler_options = ReconcilerOptions {
         clients: options.clients.clone(),
@@ -158,7 +158,30 @@ pub(super) fn render_server_shim(bridge_bin: &Path, state_file: &Path, server: &
     format!(
         r#"#!/usr/bin/env bash
 set -euo pipefail
-exec {bridge_bin} --state-file {state_file} --server {server} "$@"
+bridge_bin={bridge_bin}
+
+if [[ ! -x "$bridge_bin" ]]; then
+  for candidate in "${{MCP_GATEWAY_BRIDGE:-}}" /opt/homebrew/bin/mcp-gateway-bridge /usr/local/bin/mcp-gateway-bridge; do
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+      bridge_bin="$candidate"
+      break
+    fi
+  done
+fi
+
+if [[ ! -x "$bridge_bin" ]]; then
+  bridge_from_path="$(command -v mcp-gateway-bridge 2>/dev/null || true)"
+  if [[ -n "$bridge_from_path" && -x "$bridge_from_path" ]]; then
+    bridge_bin="$bridge_from_path"
+  fi
+fi
+
+if [[ ! -x "$bridge_bin" ]]; then
+  printf '%s\n' "mcp-gateway-bridge not found. Run 'mcpgateway install' or 'brew install mcp-gateway'." >&2
+  exit 127
+fi
+
+exec "$bridge_bin" --state-file {state_file} --server {server} "$@"
 "#,
         bridge_bin = shell_quote(&bridge_bin.to_string_lossy()),
         state_file = shell_quote(&state_file.to_string_lossy()),

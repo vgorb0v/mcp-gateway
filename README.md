@@ -1,10 +1,23 @@
 # MCP Gateway
 
-MCP Gateway is a lightweight, host-native macOS supervisor for MCP servers. It runs as a user LaunchAgent, keeps a private loopback-only control plane, exposes each configured backend through a per-server stdio shim in `~/.mcp-gateway/mcps/<server>`, serves discovery from a cache, and lazy-starts backends only for real tool calls.
+MCP Gateway is a lightweight, host-native macOS supervisor for MCP servers. It runs as a user service, keeps a private loopback-only control plane, exposes each configured backend through a per-server stdio shim in `~/.mcp-gateway/mcps/<server>`, serves discovery from a cache, and lazy-starts backends only for real tool calls.
 
 Fresh installs are empty-core: no default MCP servers, no default managed AI clients, no API keys, and no browser sessions.
 
 ## Install
+
+### Homebrew
+
+Homebrew is the primary install path:
+
+```bash
+brew tap vgorb0v/tap
+brew install mcp-gateway
+brew services start mcp-gateway
+mcpgateway doctor
+```
+
+The formula installs `mcp-gateway`, `mcp-gateway-bridge`, and `mcpgateway` into Homebrew's prefix. `brew services start mcp-gateway` provisions local state under `~/.mcp-gateway/` before starting the daemon. Homebrew owns service management, so use `brew services start mcp-gateway`, `brew services stop mcp-gateway`, and `brew services restart mcp-gateway`.
 
 ### GitHub Release
 
@@ -13,24 +26,18 @@ Download the archive for your Mac from [GitHub Releases](https://github.com/vgor
 ```bash
 tar -xzf mcp-gateway-vX.Y.Z-aarch64-apple-darwin.tar.gz
 cd mcp-gateway-vX.Y.Z-aarch64-apple-darwin
-./mcpgateway install-native
+./mcpgateway install
 ```
 
-Use the `x86_64-apple-darwin` archive on Intel Macs. The installer writes binaries and shims under `~/.mcp-gateway/` and the user LaunchAgent at:
+Use the `x86_64-apple-darwin` archive on Intel Macs. The standalone installer writes binaries and shims under `~/.mcp-gateway/` and manages the user LaunchAgent directly.
 
-```text
-~/Library/LaunchAgents/io.github.mcpgateway.daemon.plist
-```
-
-### Homebrew
-
-A Homebrew tap is planned but not published yet.
+`install-native` remains as a compatibility alias for older scripts.
 
 ### Build From Source
 
 ```bash
 cargo build --release --workspace --bins
-target/release/mcpgateway install-native
+target/release/mcpgateway install
 ```
 
 ## 90-Second Demo
@@ -61,7 +68,7 @@ mcpgateway refresh all
 mcpgateway ps
 ```
 
-`mcpgateway add` is an alias for `mcpgateway install`. It writes a single-server overlay under `~/.mcp-gateway/config/servers.d/` and does not make the server available to clients until you apply or manage client configs.
+`mcpgateway add` writes a single-server overlay under `~/.mcp-gateway/config/servers.d/` and does not make the server available to clients until you apply or manage client configs.
 
 ## Client Integration
 
@@ -91,10 +98,10 @@ mcpgateway stop all
 mcpgateway refresh all
 ```
 
-- Gateway not running: inspect `mcpgateway doctor`, then rerun `mcpgateway install-native`.
+- Gateway not running: inspect `mcpgateway doctor`, then run `brew services restart mcp-gateway` for Homebrew installs or rerun `mcpgateway install` for standalone installs.
 - Capability cache missing or stale: run `mcpgateway refresh all`.
 - Client cannot find a shim: rerun `mcpgateway apply-configs --clients <client>` and verify the shim exists.
-- Browser MCP server using the wrong browser: stop it immediately and reprovision Chrome for Testing explicitly with `mcpgateway install-native --provision chrome-for-testing`.
+- Browser MCP server using the wrong browser: stop it immediately and reprovision Chrome for Testing explicitly with `mcpgateway install --provision chrome-for-testing`.
 
 More detail is in [docs/troubleshooting.md](docs/troubleshooting.md).
 
@@ -108,7 +115,7 @@ flowchart LR
   State --> Daemon["mcp-gateway daemon"]
   Daemon --> Cache["cache/mcp_manifest_cache.json"]
   Daemon --> Backend["server-a stdio backend"]
-  Launchd["launchd user agent"] --> Daemon
+  Service["Homebrew or launchd user service"] --> Daemon
 ```
 
 The binaries are:

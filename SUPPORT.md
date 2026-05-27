@@ -5,7 +5,7 @@ MCP Gateway is an open-source macOS developer tool. Community support happens th
 ## Supported
 
 - Source builds on macOS with stable Rust.
-- User LaunchAgent installation through `mcpgateway install-native`.
+- User service installation through `mcpgateway install` or `brew services`.
 - Stdio MCP backends.
 - Per-server shim generation for supported clients.
 - Lazy backend startup and capability-cache based discovery.

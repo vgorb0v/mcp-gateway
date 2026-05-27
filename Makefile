@@ -58,13 +58,13 @@ build-debug:
 	$(CARGO) build --workspace --bins
 
 install: build
-	$(RELEASE_CLI) install-native
+	$(RELEASE_CLI) install
 
 install-debug: build-debug
-	$(DEBUG_CLI) install-native
+	$(DEBUG_CLI) install
 
 install-path: build
-	$(RELEASE_CLI) install-native --add-to-path
+	$(RELEASE_CLI) install --add-to-path
 
 deploy: fmt-check clippy test install
 

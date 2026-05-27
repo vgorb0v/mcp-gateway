@@ -41,4 +41,4 @@ Backends are local processes. They can read files, start subprocesses, open brow
 
 ## Browser MCP Policy
 
-Browser-oriented MCP servers are opt-in. They must not default to `/Applications/Google Chrome.app`, the user's regular profile, or a generated fixed debug port. Use `mcpgateway install-native --provision chrome-for-testing` when a server needs an isolated browser binary.
+Browser-oriented MCP servers are opt-in. They must not default to `/Applications/Google Chrome.app`, the user's regular profile, or a generated fixed debug port. Use `mcpgateway install --provision chrome-for-testing` when a server needs an isolated browser binary.

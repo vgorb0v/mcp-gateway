@@ -256,6 +256,61 @@ printf '%s\n' "$@" > "$BRIDGE_ARGS_FILE"
 }
 
 #[test]
+#[cfg(unix)]
+fn generated_server_shim_falls_back_to_homebrew_bridge_on_path() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::tempdir().expect("temp home");
+    let brew_bin = home.path().join("homebrew/bin");
+    let bridge = brew_bin.join("mcp-gateway-bridge");
+    fs::create_dir_all(&brew_bin).unwrap();
+    fs::write(
+        &bridge,
+        r#"#!/usr/bin/env bash
+printf '%s\n' "$@" > "$BRIDGE_ARGS_FILE"
+"#,
+    )
+    .unwrap();
+    let mut bridge_perms = fs::metadata(&bridge).unwrap().permissions();
+    bridge_perms.set_mode(0o755);
+    fs::set_permissions(&bridge, bridge_perms).unwrap();
+
+    apply_configs(ApplyConfigOptions {
+        clients: vec![],
+        servers: vec!["example-tools".to_string()],
+        bridge_bin: home.path().join(".mcp-gateway/bin/mcp-gateway-bridge"),
+        mcp_dir: home.path().join(".mcp-gateway/mcps"),
+        state_file: home.path().join(".mcp-gateway/run/state.json"),
+        dedupe: vec![],
+        dry_run: false,
+        home: home.path().to_path_buf(),
+    })
+    .expect("write shim");
+
+    let args_file = home.path().join("bridge-args.txt");
+    let shim = home.path().join(".mcp-gateway/mcps/example-tools");
+    let output = Command::new(&shim)
+        .env("BRIDGE_ARGS_FILE", &args_file)
+        .env("MCP_GATEWAY_BRIDGE", &bridge)
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", brew_bin.to_string_lossy()),
+        )
+        .output()
+        .expect("run shim");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let bridge_args = fs::read_to_string(args_file).unwrap();
+    assert!(bridge_args.contains("--server\nexample-tools"));
+    assert!(bridge_args.contains("--state-file"));
+}
+
+#[test]
 fn empty_client_and_server_selection_writes_no_client_configs_or_shims() {
     let home = tempfile::tempdir().expect("temp home");
 

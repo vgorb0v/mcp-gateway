@@ -69,6 +69,35 @@ fn doctor_exits_nonzero_when_required_binary_is_missing() {
     assert!(stdout.contains("bridge binary missing") || stdout.contains("binary missing"));
 }
 
+#[test]
+fn install_command_runs_native_setup_for_temp_home() {
+    let home = tempfile::tempdir().expect("home");
+    let paths = mcp_gateway::native::NativeInstallPaths::for_home(home.path());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_mcpgateway"))
+        .args([
+            "install",
+            "--home",
+            home.path().to_str().unwrap(),
+            "--homebrew",
+            "--skip-pnpm-install",
+            "--no-path-prompt",
+        ])
+        .output()
+        .expect("run native install");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(paths.config_file.exists());
+    assert!(paths.mcp_dir.exists());
+    assert!(!paths.bin_dir.join("mcpgateway").exists());
+    assert!(!paths.launch_agent_file.exists());
+}
+
 fn seed_install(home: &std::path::Path, addr: SocketAddr) {
     let paths = mcp_gateway::native::NativeInstallPaths::for_home(home);
     fs::create_dir_all(&paths.bin_dir).unwrap();

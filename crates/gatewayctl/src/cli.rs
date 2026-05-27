@@ -31,7 +31,7 @@ use output::OutputFormat;
     version,
     about = "Host setup helper for MCP Gateway",
     long_about = "Install, verify, and operate the host-native MCP Gateway user service.",
-    after_help = "Examples:\n  mcpgateway demo\n  mcpgateway install @modelcontextprotocol/server-filesystem --name filesystem --arg=/tmp\n  mcpgateway refresh all\n  mcpgateway apply-configs --clients codex,claude-code\n\nDocs: https://github.com/vgorb0v/mcp-gateway"
+    after_help = "Examples:\n  mcpgateway install\n  mcpgateway add @modelcontextprotocol/server-filesystem --name filesystem --arg=/tmp\n  mcpgateway refresh all\n  mcpgateway apply-configs --clients codex,claude-code\n\nDocs: https://github.com/vgorb0v/mcp-gateway"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -62,6 +62,7 @@ enum Commands {
         home: Option<PathBuf>,
     },
     /// Install or refresh native binaries, config, shims, and the LaunchAgent.
+    #[command(name = "install", alias = "install-native")]
     InstallNative {
         #[arg(long, value_delimiter = ',')]
         clients: Vec<ClientKind>,
@@ -78,11 +79,13 @@ enum Commands {
         #[arg(long)]
         no_path_prompt: bool,
         #[arg(long)]
+        homebrew: bool,
+        #[arg(long)]
         home: Option<PathBuf>,
     },
     /// Install a pnpm package as a gateway-managed MCP server.
-    #[command(alias = "add")]
-    Install {
+    #[command(name = "add", alias = "install-package")]
+    Add {
         package: String,
         #[arg(long)]
         name: Option<String>,
@@ -146,6 +149,8 @@ enum Commands {
         state_file: Option<PathBuf>,
         #[arg(long)]
         skip_launchctl: bool,
+        #[arg(long)]
+        homebrew: bool,
     },
     /// Scan each detected client config for MCP entries that the gateway
     /// didn't write. Useful before flipping someone over to gateway-managed
@@ -158,7 +163,7 @@ enum Commands {
         )]
         clients: Vec<ClientKind>,
         /// Write the discovered entries as `~/.mcp-gateway/config/servers.d/<name>.yaml`
-        /// stubs so a future install-native can promote them. Without this
+        /// stubs so a future install can promote them. Without this
         /// flag the command just prints findings.
         #[arg(long)]
         write: bool,
@@ -195,6 +200,7 @@ pub fn run() -> Result<()> {
             let paths = NativeInstallPaths::for_home(&home);
             let config_path = config.unwrap_or_else(|| paths.config_file.clone());
             let cfg = Config::load_file(&config_path)?;
+            let homebrew_prefix = detected_homebrew_prefix(false)?;
             let group_config = cfg.groups.get(&group).with_context(|| {
                 format!(
                     "config group '{group}' does not exist in {}",
@@ -204,7 +210,8 @@ pub fn run() -> Result<()> {
             let changed = mcp_gateway::client_config::apply_configs(ApplyConfigOptions {
                 clients,
                 servers: group_config.servers.clone(),
-                bridge_bin: bridge_bin.unwrap_or_else(|| paths.bin_dir.join("mcp-gateway-bridge")),
+                bridge_bin: bridge_bin
+                    .unwrap_or_else(|| default_bridge_bin(&paths, homebrew_prefix.as_deref())),
                 mcp_dir: mcp_dir.unwrap_or(paths.mcp_dir),
                 state_file: state_file.unwrap_or(paths.state_file),
                 dedupe,
@@ -228,6 +235,7 @@ pub fn run() -> Result<()> {
             skip_launchctl,
             add_to_path,
             no_path_prompt,
+            homebrew,
             home,
         } => {
             let home = home
@@ -241,6 +249,7 @@ pub fn run() -> Result<()> {
                 skip_launchctl,
                 add_to_path,
                 no_path_prompt,
+                homebrew,
                 home,
             })?;
             if changed.is_empty() {
@@ -252,7 +261,7 @@ pub fn run() -> Result<()> {
                 }
             }
         }
-        Commands::Install {
+        Commands::Add {
             package,
             name,
             bin,
@@ -305,11 +314,13 @@ pub fn run() -> Result<()> {
             gateway,
             state_file,
             skip_launchctl,
+            homebrew,
         } => run_doctor(DoctorOptions {
             home,
             gateway,
             state_file,
             skip_launchctl,
+            homebrew,
         })?,
         Commands::ImportClients {
             clients,
@@ -325,6 +336,7 @@ struct DoctorOptions {
     gateway: Option<String>,
     state_file: Option<PathBuf>,
     skip_launchctl: bool,
+    homebrew: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -381,6 +393,7 @@ fn run_doctor(options: DoctorOptions) -> Result<()> {
         .or_else(dirs::home_dir)
         .context("could not determine home directory")?;
     let paths = NativeInstallPaths::for_home(&home);
+    let homebrew_prefix = detected_homebrew_prefix(options.homebrew)?;
     let mut checks = Vec::new();
 
     checks.push(if cfg!(target_os = "macos") {
@@ -390,10 +403,10 @@ fn run_doctor(options: DoctorOptions) -> Result<()> {
     });
 
     for binary in ["mcp-gateway", "mcp-gateway-bridge", "mcpgateway"] {
-        let path = paths.bin_dir.join(binary);
+        let path = doctor_binary_path(binary, &paths, homebrew_prefix.as_deref());
         if !path.exists() {
             checks.push(DoctorCheck::fail(format!(
-                "{} binary missing: run `mcpgateway install-native`",
+                "{} binary missing: run `mcpgateway install` or `brew install mcp-gateway`",
                 binary_label(binary)
             )));
             continue;
@@ -419,7 +432,17 @@ fn run_doctor(options: DoctorOptions) -> Result<()> {
         }
     }
 
-    if !paths.launch_agent_file.exists() {
+    if homebrew_prefix.is_some() {
+        checks.push(DoctorCheck::info(
+            "service managed by Homebrew: use `brew services start mcp-gateway`",
+        ));
+        if paths.launch_agent_file.exists() {
+            checks.push(DoctorCheck::warn(format!(
+                "manual launchd plist still exists: {}",
+                paths.launch_agent_file.display()
+            )));
+        }
+    } else if !paths.launch_agent_file.exists() {
         checks.push(DoctorCheck::fail(format!(
             "launchd plist missing: {}",
             paths.launch_agent_file.display()
@@ -443,7 +466,7 @@ fn run_doctor(options: DoctorOptions) -> Result<()> {
             paths.legacy_launch_agent_file.display()
         )));
     }
-    if !options.skip_launchctl && paths.launch_agent_file.exists() {
+    if homebrew_prefix.is_none() && !options.skip_launchctl && paths.launch_agent_file.exists() {
         checks.push(match launchctl_print_label(LAUNCH_AGENT_LABEL) {
             Ok(()) => DoctorCheck::ok(format!("launchd loaded: {LAUNCH_AGENT_LABEL}")),
             Err(err) => DoctorCheck::warn(format!("launchd not loaded or not printable: {err}")),
@@ -534,7 +557,12 @@ fn run_doctor(options: DoctorOptions) -> Result<()> {
     }
 
     if let Some(cfg) = &cfg {
-        checks.extend(check_managed_clients(cfg, &paths, &home));
+        checks.extend(check_managed_clients(
+            cfg,
+            &paths,
+            &home,
+            homebrew_prefix.as_deref(),
+        ));
     }
     checks.push(check_command_available("pnpm"));
     checks.push(check_command_available("npx"));
@@ -556,6 +584,20 @@ fn binary_label(binary: &str) -> &'static str {
         "mcpgateway" => "CLI",
         _ => "daemon",
     }
+}
+
+fn doctor_binary_path(
+    binary: &str,
+    paths: &NativeInstallPaths,
+    homebrew_prefix: Option<&Path>,
+) -> PathBuf {
+    let local = paths.bin_dir.join(binary);
+    if local.exists() {
+        return local;
+    }
+    homebrew_prefix
+        .map(|prefix| prefix.join("bin").join(binary))
+        .unwrap_or(local)
 }
 
 fn doctor_prefix(status: DoctorStatus) -> &'static str {
@@ -594,6 +636,7 @@ fn check_managed_clients(
     cfg: &Config,
     paths: &NativeInstallPaths,
     home: &Path,
+    homebrew_prefix: Option<&Path>,
 ) -> Vec<DoctorCheck> {
     let clients = cfg
         .clients
@@ -610,13 +653,17 @@ fn check_managed_clients(
             cfg.clients.default_group
         ))];
     };
-    let reconciler = ClientConfigReconciler::new(ReconcilerOptions::from_native(
+    let reconciler = ClientConfigReconciler::new(ReconcilerOptions {
         clients,
-        group.servers.clone(),
-        paths,
-        vec!["mcp-gateway".to_string()],
-        home.to_path_buf(),
-    ));
+        servers: group.servers.clone(),
+        bridge_bin: default_bridge_bin(paths, homebrew_prefix),
+        mcp_dir: paths.mcp_dir.clone(),
+        state_file: paths.state_file.clone(),
+        dedupe: vec!["mcp-gateway".to_string()],
+        home: home.to_path_buf(),
+        manifest_path: paths.root.join("state/client-manifest.json"),
+        backups_dir: paths.backups_dir.clone(),
+    });
     match reconciler.status() {
         Ok(statuses) if statuses.is_empty() => {
             vec![DoctorCheck::info("managed clients: none configured")]
@@ -902,19 +949,28 @@ pub(crate) struct InstallNativeOptions {
     pub(crate) skip_launchctl: bool,
     pub(crate) add_to_path: bool,
     pub(crate) no_path_prompt: bool,
+    pub(crate) homebrew: bool,
     pub(crate) home: PathBuf,
 }
 
 pub(crate) fn install_native(options: InstallNativeOptions) -> Result<Vec<PathBuf>> {
     let paths = NativeInstallPaths::for_home(&options.home);
-    let first_install = !paths.bin_dir.join("mcpgateway").exists();
+    let homebrew_prefix = detected_homebrew_prefix(options.homebrew)?;
+    let is_homebrew = homebrew_prefix.is_some();
+    let first_install = !is_homebrew && !paths.bin_dir.join("mcpgateway").exists();
     create_native_dirs(&paths)?;
 
     let mut changed = Vec::new();
     if migrate_legacy_launch_agent(&paths, options.skip_launchctl)? {
         changed.push(paths.legacy_launch_agent_file.clone());
     }
-    changed.extend(copy_binaries(&paths)?);
+    if is_homebrew {
+        if remove_manual_launch_agent(&paths, options.skip_launchctl)? {
+            changed.push(paths.launch_agent_file.clone());
+        }
+    } else {
+        changed.extend(copy_binaries(&paths)?);
+    }
     if remove_legacy_ctl_binary(&paths)? {
         changed.push(paths.bin_dir.join("mcp-gatewayctl"));
     }
@@ -956,10 +1012,15 @@ pub(crate) fn install_native(options: InstallNativeOptions) -> Result<Vec<PathBu
     {
         changed.push(paths.config_file.clone());
     }
-    if write_if_changed(&paths.launch_agent_file, &render_launch_agent_plist(&paths))? {
+    if !is_homebrew
+        && write_if_changed(&paths.launch_agent_file, &render_launch_agent_plist(&paths))?
+    {
         changed.push(paths.launch_agent_file.clone());
     }
-    if options.add_to_path || (first_install && !options.no_path_prompt && prompt_add_to_path()?) {
+    if !is_homebrew
+        && (options.add_to_path
+            || (first_install && !options.no_path_prompt && prompt_add_to_path()?))
+    {
         let profile = shell_profile_path(&options.home);
         if ensure_path_profile_entry(&profile)? {
             changed.push(profile);
@@ -977,15 +1038,17 @@ pub(crate) fn install_native(options: InstallNativeOptions) -> Result<Vec<PathBu
         )
     })?;
     let clients = install_clients_from_cli_or_config(options.clients, &cfg);
-    refresh_capabilities_in_process(&cfg, &paths, &options.group, "all")?;
-    if paths.capability_cache_file.exists() {
+    if !is_homebrew {
+        refresh_capabilities_in_process(&cfg, &paths, &options.group, "all")?;
+    }
+    if !is_homebrew && paths.capability_cache_file.exists() {
         changed.push(paths.capability_cache_file.clone());
     }
     changed.extend(mcp_gateway::client_config::apply_configs(
         ApplyConfigOptions {
             clients,
             servers: group.servers.clone(),
-            bridge_bin: paths.bin_dir.join("mcp-gateway-bridge"),
+            bridge_bin: default_bridge_bin(&paths, homebrew_prefix.as_deref()),
             mcp_dir: paths.mcp_dir.clone(),
             state_file: paths.state_file.clone(),
             dedupe: vec!["mcp-gateway".to_string()],
@@ -994,7 +1057,7 @@ pub(crate) fn install_native(options: InstallNativeOptions) -> Result<Vec<PathBu
         },
     )?);
 
-    if !options.skip_launchctl {
+    if !is_homebrew && !options.skip_launchctl {
         load_launch_agent(&paths)?;
     }
 
@@ -1071,9 +1134,11 @@ fn create_native_dirs(paths: &NativeInstallPaths) -> Result<()> {
         &paths.backends_dir,
         &paths.mcp_dir,
         &paths.config_dir,
+        &paths.config_servers_d_dir,
         &paths.cache_dir,
         &paths.run_dir,
         &paths.logs_dir,
+        &paths.backups_dir,
         &paths.browsers_dir,
         &paths.chrome_for_testing_dir,
     ] {
@@ -1154,7 +1219,7 @@ fn sync_managed_client_configs(
         ApplyConfigOptions {
             clients,
             servers: group_config.servers.clone(),
-            bridge_bin: paths.bin_dir.join("mcp-gateway-bridge"),
+            bridge_bin: default_bridge_bin(paths, detected_homebrew_prefix(false)?.as_deref()),
             mcp_dir: paths.mcp_dir.clone(),
             state_file: paths.state_file.clone(),
             dedupe: vec!["mcp-gateway".to_string()],
@@ -1172,6 +1237,75 @@ fn prepend_backend_path(paths: &NativeInstallPaths) {
     if let Ok(joined) = std::env::join_paths(paths) {
         std::env::set_var("PATH", joined);
     }
+}
+
+fn detected_homebrew_prefix(force_homebrew: bool) -> Result<Option<PathBuf>> {
+    let current_exe = std::env::current_exe()?;
+    if let Some(prefix) = homebrew_prefix_from_executable(&current_exe) {
+        return Ok(Some(prefix));
+    }
+    if !force_homebrew {
+        return Ok(None);
+    }
+    Ok(std::env::var_os("HOMEBREW_PREFIX")
+        .map(PathBuf::from)
+        .or_else(|| Some(default_homebrew_prefix())))
+}
+
+fn default_homebrew_prefix() -> PathBuf {
+    for prefix in [PathBuf::from("/opt/homebrew"), PathBuf::from("/usr/local")] {
+        if prefix.exists() {
+            return prefix;
+        }
+    }
+    PathBuf::from("/opt/homebrew")
+}
+
+fn homebrew_prefix_from_executable(executable: &Path) -> Option<PathBuf> {
+    for prefix in homebrew_prefix_candidates() {
+        if executable == prefix.join("bin/mcpgateway")
+            || executable.starts_with(prefix.join("Cellar/mcp-gateway"))
+            || executable.starts_with(prefix.join("opt/mcp-gateway"))
+        {
+            return Some(prefix);
+        }
+    }
+
+    let components = executable.components().collect::<Vec<_>>();
+    for (index, component) in components.iter().enumerate() {
+        let Some(next) = components.get(index + 1) else {
+            continue;
+        };
+        if !matches!(component.as_os_str().to_str(), Some("Cellar" | "opt"))
+            || next.as_os_str() != "mcp-gateway"
+        {
+            continue;
+        }
+        let mut prefix = PathBuf::new();
+        for prefix_component in &components[..index] {
+            prefix.push(prefix_component.as_os_str());
+        }
+        return Some(prefix);
+    }
+    None
+}
+
+fn homebrew_prefix_candidates() -> Vec<PathBuf> {
+    let mut prefixes = Vec::new();
+    if let Some(prefix) = std::env::var_os("HOMEBREW_PREFIX").map(PathBuf::from) {
+        prefixes.push(prefix);
+    }
+    prefixes.push(PathBuf::from("/opt/homebrew"));
+    prefixes.push(PathBuf::from("/usr/local"));
+    prefixes.sort();
+    prefixes.dedup();
+    prefixes
+}
+
+fn default_bridge_bin(paths: &NativeInstallPaths, homebrew_prefix: Option<&Path>) -> PathBuf {
+    homebrew_prefix
+        .map(|prefix| prefix.join("bin/mcp-gateway-bridge"))
+        .unwrap_or_else(|| paths.bin_dir.join("mcp-gateway-bridge"))
 }
 
 fn copy_binaries(paths: &NativeInstallPaths) -> Result<Vec<PathBuf>> {
@@ -1204,6 +1338,17 @@ fn remove_legacy_ctl_binary(paths: &NativeInstallPaths) -> Result<bool> {
         return Ok(false);
     }
     fs::remove_file(&legacy)?;
+    Ok(true)
+}
+
+fn remove_manual_launch_agent(paths: &NativeInstallPaths, skip_launchctl: bool) -> Result<bool> {
+    if !paths.launch_agent_file.exists() {
+        return Ok(false);
+    }
+    if !skip_launchctl {
+        unload_launch_agent_label(LAUNCH_AGENT_LABEL, Some(&paths.launch_agent_file));
+    }
+    fs::remove_file(&paths.launch_agent_file)?;
     Ok(true)
 }
 
@@ -1772,6 +1917,65 @@ CHROME_REMOTE_DEBUGGING_URL=http://old-debug-url
         assert_eq!(manifest["name"], "mcpgateway-backends");
         assert_eq!(manifest["private"], true);
         assert!(manifest.get("dependencies").is_none());
+    }
+
+    #[test]
+    fn homebrew_install_provisions_state_without_copying_binaries_or_writing_plist() {
+        let home = tempfile::tempdir().expect("home");
+        let paths = mcp_gateway::native::NativeInstallPaths::for_home(home.path());
+
+        let changed = super::install_native(super::InstallNativeOptions {
+            clients: vec![],
+            group: "coding".to_string(),
+            provision: vec![],
+            skip_pnpm_install: true,
+            skip_launchctl: false,
+            add_to_path: false,
+            no_path_prompt: true,
+            homebrew: true,
+            home: home.path().to_path_buf(),
+        })
+        .expect("homebrew install provisions local state");
+
+        assert!(paths.config_file.exists());
+        assert!(paths.config_servers_d_dir.exists());
+        assert!(paths.mcp_dir.exists());
+        assert!(paths.logs_dir.exists());
+        assert!(paths.run_dir.exists());
+        assert!(!paths.bin_dir.join("mcpgateway").exists());
+        assert!(!paths.bin_dir.join("mcp-gateway").exists());
+        assert!(!paths.bin_dir.join("mcp-gateway-bridge").exists());
+        assert!(!paths.launch_agent_file.exists());
+        assert!(!changed.contains(&paths.launch_agent_file));
+    }
+
+    #[test]
+    fn detects_homebrew_executables_from_cellar_opt_or_prefix_bin_paths() {
+        let arm_prefix = Path::new("/opt/homebrew");
+        let intel_prefix = Path::new("/usr/local");
+
+        assert_eq!(
+            super::homebrew_prefix_from_executable(
+                &arm_prefix.join("Cellar/mcp-gateway/0.1.0/bin/mcpgateway")
+            ),
+            Some(arm_prefix.to_path_buf())
+        );
+        assert_eq!(
+            super::homebrew_prefix_from_executable(
+                &arm_prefix.join("opt/mcp-gateway/bin/mcpgateway")
+            ),
+            Some(arm_prefix.to_path_buf())
+        );
+        assert_eq!(
+            super::homebrew_prefix_from_executable(&intel_prefix.join("bin/mcpgateway")),
+            Some(intel_prefix.to_path_buf())
+        );
+        assert_eq!(
+            super::homebrew_prefix_from_executable(Path::new(
+                "/Users/dev/project/target/release/mcpgateway"
+            )),
+            None
+        );
     }
 
     #[test]

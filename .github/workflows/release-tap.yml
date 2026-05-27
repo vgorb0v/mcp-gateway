@@ -1,0 +1,120 @@
+name: Release Homebrew Tap
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish to the tap, for example v0.1.0"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TAP_REPOSITORY: vgorb0v/homebrew-tap
+
+jobs:
+  update-tap:
+    name: Update tap formula
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.release.tag_name }}"
+          if [[ -z "$tag" ]]; then
+            tag="${{ inputs.tag }}"
+          fi
+          version="${tag#v}"
+          echo "TAG=${tag}" >> "$GITHUB_ENV"
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          path: source
+
+      - name: Calculate release archive hashes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          source_url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
+          curl -fsSL "$source_url" -o "dist/mcp-gateway-${TAG}-source.tar.gz"
+          source_sha="$(sha256sum "dist/mcp-gateway-${TAG}-source.tar.gz" | awk '{print $1}')"
+          echo "SOURCE_SHA256=${source_sha}" >> "$GITHUB_ENV"
+
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "mcp-gateway-${TAG}-*.tar.gz" \
+            --dir dist
+          sha256sum dist/*.tar.gz | sort -k2 > dist/SHA256SUMS
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          repository: ${{ env.TAP_REPOSITORY }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        shell: bash
+        env:
+          SOURCE_SHA256: ${{ env.SOURCE_SHA256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p homebrew-tap/Formula
+          cp source/Formula/mcp-gateway.rb homebrew-tap/Formula/mcp-gateway.rb
+          ruby <<'RUBY'
+          path = "homebrew-tap/Formula/mcp-gateway.rb"
+          tag = ENV.fetch("TAG")
+          version = ENV.fetch("VERSION")
+          sha = ENV.fetch("SOURCE_SHA256")
+          repo = ENV.fetch("GITHUB_REPOSITORY")
+
+          formula = File.read(path)
+          formula.gsub!(
+            %r{url "[^"]+"(?:, branch: "[^"]+")?},
+            %(url "https://github.com/#{repo}/archive/refs/tags/#{tag}.tar.gz")
+          )
+          formula.gsub!(/version "[^"]+"/, %(version "#{version}"))
+          if formula.match?(/sha256 "[0-9a-f]{64}"/)
+            formula.gsub!(/sha256 "[0-9a-f]{64}"/, %(sha256 "#{sha}"))
+          else
+            formula.sub!(/(\n  license "[^"]+"\n)/, "\\1  sha256 \"#{sha}\"\n")
+          end
+          File.write(path, formula)
+          RUBY
+
+      - name: Commit tap update
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- Formula/mcp-gateway.rb; then
+            echo "Formula already up to date"
+            exit 0
+          fi
+          git add Formula/mcp-gateway.rb
+          git commit -m "mcp-gateway ${TAG}"
+          git push
+
+      - name: Hash summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### Homebrew formula"
+            echo
+            echo "- Tag: ${TAG}"
+            echo "- Source SHA256: ${SOURCE_SHA256}"
+            echo
+            echo "### Release archive SHA256"
+            echo
+            sed 's/^/- `/' dist/SHA256SUMS | sed 's/$/`/'
+          } >> "$GITHUB_STEP_SUMMARY"

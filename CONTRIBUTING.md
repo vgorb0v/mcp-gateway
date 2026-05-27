@@ -13,7 +13,7 @@ For a native install from your checkout:
 
 ```bash
 cargo build --release --workspace --bins
-target/release/mcpgateway install-native
+target/release/mcpgateway install
 ```
 
 Use `--skip-launchctl --no-path-prompt --home <temp-dir>` when testing installer behavior without touching your real home directory.

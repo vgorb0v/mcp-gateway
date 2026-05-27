@@ -43,9 +43,11 @@ This keeps clients AI-client agnostic and avoids a visible aggregate `mcp-gatewa
 - `tools/call`: routed to the owning backend, lazy-starting that backend if needed.
 - Notifications: forwarded to running backends or bridge sessions as appropriate.
 
-## launchd
+## User Service
 
-`mcpgateway install-native` writes `~/Library/LaunchAgents/io.github.mcpgateway.daemon.plist`. The LaunchAgent starts the daemon at login with the config, env file, state file, and cache file paths under `~/.mcp-gateway`.
+Homebrew installs use the formula `service` block and are managed with `brew services start/stop mcp-gateway`. Standalone source or GitHub release installs can still use `mcpgateway install`, which writes a user LaunchAgent at `~/Library/LaunchAgents/io.github.mcpgateway.daemon.plist`.
+
+Both service paths start the daemon with the config, env file, state file, and cache file paths under `~/.mcp-gateway`.
 
 ## Capability Cache
 
