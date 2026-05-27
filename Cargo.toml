@@ -7,14 +7,21 @@ members = [
 ]
 
 [workspace.package]
+version = "0.1.0"
 edition = "2021"
+rust-version = "1.95.0"
 license = "MIT"
 description = "Host-native macOS supervisor for lazy-started MCP servers"
-homepage = "https://github.com/<GITHUB_OWNER>/mcp-gateway"
-repository = "https://github.com/<GITHUB_OWNER>/mcp-gateway"
+homepage = "https://github.com/vgorb0v/mcp-gateway"
+repository = "https://github.com/vgorb0v/mcp-gateway"
 readme = "README.md"
 keywords = ["mcp", "macos", "launchd", "supervisor", "developer-tools"]
 categories = ["command-line-utilities", "development-tools"]
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
 
 [workspace.dependencies]
 anyhow = "1"

@@ -73,6 +73,9 @@ runtime:
   command: "docs-mcp-server"
   args: ["--stdio"]
   lazy: true
+  idle_timeout_seconds: 1200
+  startup_timeout_seconds: 30
+  request_timeout_seconds: 60
 env:
   DOCS_MODE: "local"
 secrets:
@@ -80,7 +83,7 @@ secrets:
     required: true
 ```
 
-Disabled overlays are parsed but not merged. Overlays cannot shadow servers already defined in `gateway.yaml`.
+Disabled overlays are parsed but not merged. Overlays cannot shadow servers already defined in `gateway.yaml`. The canonical timeout fields are `idle_timeout_seconds`, `startup_timeout_seconds`, and `request_timeout_seconds`; older `*_secs` overlay fields still load for compatibility.
 
 ## Groups and Clients
 

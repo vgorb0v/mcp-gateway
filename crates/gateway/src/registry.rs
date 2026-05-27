@@ -217,19 +217,19 @@ impl BackendRegistry {
     }
 
     pub async fn server_health(&self, name: &str) -> Result<BackendHealth> {
-        self.backend(name)?.health().await.pipe(Ok)
+        Ok(self.backend(name)?.health().await)
     }
 
     pub async fn restart(&self, name: &str) -> Result<BackendHealth> {
         let backend = self.backend(name)?;
         backend.restart().await?;
-        backend.health().await.pipe(Ok)
+        Ok(backend.health().await)
     }
 
     pub async fn stop(&self, name: &str) -> Result<BackendHealth> {
         let backend = self.backend(name)?;
         backend.stop().await?;
-        backend.health().await.pipe(Ok)
+        Ok(backend.health().await)
     }
 
     pub async fn shutdown_all(&self) {
@@ -813,11 +813,3 @@ impl WithData for JsonRpcError {
         self
     }
 }
-
-trait Pipe: Sized {
-    fn pipe<T>(self, f: impl FnOnce(Self) -> T) -> T {
-        f(self)
-    }
-}
-
-impl<T> Pipe for T {}

@@ -72,6 +72,34 @@ fn source_tree_has_no_accidental_real_looking_secrets() {
     );
 }
 
+#[test]
+fn repository_has_public_health_files_and_no_fake_server_release_bin() {
+    let root = repo_root();
+    for file in ["SECURITY.md", "CODE_OF_CONDUCT.md", "CHANGELOG.md"] {
+        assert!(
+            root.join(file).is_file(),
+            "missing root-level community file {file}"
+        );
+    }
+
+    let gateway_toml = fs::read_to_string(root.join("crates/gateway/Cargo.toml"))
+        .expect("read gateway Cargo.toml");
+    assert!(
+        !gateway_toml.contains("name = \"fake_mcp_server\""),
+        "fake MCP server must not be a release binary"
+    );
+    assert!(
+        gateway_toml.contains("[[example]]") && gateway_toml.contains("fake-mcp-server"),
+        "fake MCP server should live as a Cargo example"
+    );
+
+    let root_toml = fs::read_to_string(root.join("Cargo.toml")).expect("read root Cargo.toml");
+    assert!(
+        !root_toml.contains("<GITHUB_OWNER>"),
+        "workspace metadata must not contain placeholder GitHub owner"
+    );
+}
+
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()

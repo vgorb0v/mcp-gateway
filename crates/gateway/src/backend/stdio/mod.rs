@@ -1,12 +1,11 @@
 use std::collections::{BTreeMap, VecDeque};
-use std::io;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use serde_json::json;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use uuid::Uuid;
@@ -20,6 +19,16 @@ use crate::jsonrpc::{
 };
 use crate::logs::LogStore;
 use crate::metrics::{BackendRpcMetrics, ResourceSample, RpcMetricsSnapshot};
+
+mod jsonrpc_io;
+mod lifecycle;
+mod line_io;
+mod process;
+
+use jsonrpc_io::{browser_debug_url, ensure_browser_debug_url};
+use lifecycle::LifecycleState;
+use line_io::read_capped_line;
+use process::{apply_backend_resource_policy, terminate_process_group};
 
 #[derive(Clone)]
 pub struct StdioBackend {
@@ -62,25 +71,6 @@ struct State {
     state: LifecycleState,
     last_error: Option<String>,
     restart_attempts: VecDeque<Instant>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LifecycleState {
-    Stopped,
-    Starting,
-    Running,
-    Unhealthy,
-}
-
-impl LifecycleState {
-    fn as_str(self) -> &'static str {
-        match self {
-            LifecycleState::Stopped => "stopped",
-            LifecycleState::Starting => "starting",
-            LifecycleState::Running => "running",
-            LifecycleState::Unhealthy => "unhealthy",
-        }
-    }
 }
 
 impl StdioBackend {
@@ -711,153 +701,5 @@ impl BackendTransport for StdioBackend {
 
     fn last_resource_sample(&self) -> Option<ResourceSample> {
         *self.inner.last_sample.lock()
-    }
-}
-
-fn browser_debug_url(config: &ServerConfig) -> Option<String> {
-    config.args.iter().find_map(|arg| {
-        arg.strip_prefix("--browser-url=")
-            .map(|value| value.to_string())
-    })
-}
-
-async fn ensure_browser_debug_url(url: &str) -> Result<()> {
-    let version_url = format!("{}/json/version", url.trim_end_matches('/'));
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(1))
-        .build()
-        .map_err(|err| GatewayError::Backend(err.to_string()))?;
-    let response = client.get(&version_url).send().await;
-    match response {
-        Ok(response) if response.status().is_success() => Ok(()),
-        Ok(response) => Err(GatewayError::Backend(format!(
-            "Browser remote debugging is not reachable at {url} (GET /json/version returned {})",
-            response.status()
-        ))),
-        Err(err) => Err(GatewayError::Backend(format!(
-            "Browser remote debugging is not reachable at {url}: {err}. Check the explicit browser attach endpoint, or remove the attach flag to let the MCP server launch its own isolated browser."
-        ))),
-    }
-}
-
-fn apply_backend_resource_policy(pid: u32) {
-    #[cfg(target_os = "macos")]
-    {
-        if let Err(err) = try_apply_darwin_background(pid) {
-            tracing::debug!(pid, error = %err, "failed to apply Darwin background policy");
-            let _ = try_apply_nice(pid, 5);
-        }
-    }
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let _ = try_apply_nice(pid, 5);
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn try_apply_darwin_background(pid: u32) -> std::io::Result<()> {
-    let rc = unsafe {
-        libc::setpriority(
-            libc::PRIO_DARWIN_PROCESS,
-            pid as libc::id_t,
-            libc::PRIO_DARWIN_BG,
-        )
-    };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error())
-    }
-}
-
-#[cfg(unix)]
-fn try_apply_nice(pid: u32, priority: libc::c_int) -> std::io::Result<()> {
-    let rc = unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, priority) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error())
-    }
-}
-
-#[cfg(unix)]
-fn terminate_process_group(pid: u32, signal: libc::c_int) {
-    let pgid = -(pid as libc::pid_t);
-    unsafe {
-        libc::kill(pgid, signal);
-    }
-}
-
-async fn read_capped_line<R>(
-    reader: &mut R,
-    line: &mut Vec<u8>,
-    max_bytes: usize,
-) -> io::Result<Option<bool>>
-where
-    R: AsyncBufRead + Unpin,
-{
-    line.clear();
-    let mut truncated = false;
-    loop {
-        let available = reader.fill_buf().await?;
-        if available.is_empty() {
-            trim_line_end(line);
-            return if line.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(truncated))
-            };
-        }
-
-        if let Some(pos) = available.iter().position(|byte| *byte == b'\n') {
-            truncated |= append_capped(line, &available[..pos], max_bytes);
-            reader.consume(pos + 1);
-            trim_line_end(line);
-            return Ok(Some(truncated));
-        }
-
-        let consumed = available.len();
-        truncated |= append_capped(line, available, max_bytes);
-        reader.consume(consumed);
-    }
-}
-
-fn append_capped(line: &mut Vec<u8>, chunk: &[u8], max_bytes: usize) -> bool {
-    let remaining = max_bytes.saturating_sub(line.len());
-    let copied = remaining.min(chunk.len());
-    if copied > 0 {
-        line.extend_from_slice(&chunk[..copied]);
-    }
-    copied < chunk.len()
-}
-
-fn trim_line_end(line: &mut Vec<u8>) {
-    while matches!(line.last(), Some(b'\n' | b'\r')) {
-        line.pop();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn darwin_background_policy_can_be_applied_to_spawned_child() {
-        use std::process::Command;
-
-        let mut child = Command::new("/bin/sleep")
-            .arg("1")
-            .spawn()
-            .expect("spawn sleep");
-        let pid = child.id();
-
-        let result = super::try_apply_darwin_background(pid);
-
-        let _ = child.kill();
-        let _ = child.wait();
-        assert!(
-            result.is_ok(),
-            "Darwin background policy failed: {result:?}"
-        );
     }
 }

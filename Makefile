@@ -1,4 +1,4 @@
-.PHONY: help fmt fmt-check clippy test build build-debug install install-debug install-path deploy refresh ps clean
+.PHONY: help fmt fmt-check clippy test build build-debug install install-debug install-path deploy check ci smoke demo nextest refresh ps clean
 
 CARGO ?= cargo
 RELEASE_CLI := target/release/mcpgateway
@@ -13,6 +13,11 @@ help:
 		'  make build-debug   Build debug binaries for fast iteration' \
 		'  make install-debug Build debug binaries and install locally' \
 		'  make install-path  Install locally and add ~/.mcp-gateway/bin to PATH' \
+		'  make check         Run formatting, clippy, and tests' \
+		'  make ci            Run the local CI gate' \
+		'  make smoke         Run the temp-home installer smoke test' \
+		'  make demo          Run the 90-second local demo proof path' \
+		'  make nextest       Run tests with cargo-nextest when installed' \
 		'  make refresh       Refresh cached MCP capabilities' \
 		'  make ps            Show gateway backend status' \
 		'  make test          Run workspace tests' \
@@ -32,6 +37,19 @@ clippy:
 
 test:
 	$(CARGO) test --workspace
+
+check: fmt-check clippy test
+
+ci: check build smoke
+
+smoke:
+	scripts/smoke-test.sh
+
+demo: build
+	$(RELEASE_CLI) demo
+
+nextest:
+	$(CARGO) nextest run --workspace
 
 build:
 	$(CARGO) build --release --workspace --bins
