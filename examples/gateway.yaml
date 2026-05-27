@@ -1,0 +1,62 @@
+listen: "127.0.0.1:0"
+
+defaults:
+  idle_timeout_seconds: 1200
+  startup_timeout_seconds: 30
+  request_timeout_seconds: 60
+  restart_policy: "on_failure"
+
+limits:
+  max_clients: 128
+  max_message_bytes: 8388608
+  max_batch_items: 32
+  max_pending_requests_per_backend: 128
+  backend_stdin_queue: 64
+  max_session_events: 128
+  session_ttl_seconds: 300
+  max_log_entries_per_server: 256
+  max_log_line_bytes: 8192
+  backend_notification_broadcast: 128
+  gateway_notification_broadcast: 256
+  max_restart_attempts: 3
+  restart_window_seconds: 60
+
+servers:
+  my-server:
+    transport: stdio
+    command: "my-mcp-server"
+    args: []
+    env:
+      NODE_ENV: "production"
+    lazy: true
+
+  # Optional browser-style recipe:
+  #
+  # 1. Provision an AI-only browser:
+  #      mcpgateway install-native --provision chrome-for-testing
+  # 2. Install the MCP package you want:
+  #      mcpgateway install @scope/browser-mcp --name browser-tools
+  # 3. Uncomment and adapt this server entry.
+  #
+  # browser-tools:
+  #   transport: stdio
+  #   command: "browser-mcp-server"
+  #   args:
+  #     - "--executablePath=${MCP_GATEWAY_CHROME_FOR_TESTING_EXECUTABLE}"
+  #     - "--headless=true"
+  #     - "--isolated=true"
+  #   lazy: true
+  #   singleton: true
+  #   dangerous: true
+
+groups:
+  coding:
+    servers: ["my-server"]
+    expose_tools: true
+    expose_prompts: true
+    expose_resources: true
+
+clients:
+  default_group: "coding"
+  server_name: "mcp-gateway"
+  managed_clients: []

@@ -1,0 +1,51 @@
+[package]
+name = "mcp-gateway-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description.workspace = true
+homepage.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+
+[lib]
+name = "mcp_gateway"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mcp-gateway"
+path = "src/main.rs"
+
+[[bin]]
+name = "fake_mcp_server"
+path = "../../tests/fixtures/fake_mcp_server.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+clap.workspace = true
+futures.workspace = true
+libc.workspace = true
+parking_lot.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sysinfo.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml_edit.workspace = true
+tower.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tower.workspace = true

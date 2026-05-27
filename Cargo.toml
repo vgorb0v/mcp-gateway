@@ -1,0 +1,49 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/gateway",
+  "crates/bridge",
+  "crates/gatewayctl",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+description = "Host-native macOS supervisor for lazy-started MCP servers"
+homepage = "https://github.com/<GITHUB_OWNER>/mcp-gateway"
+repository = "https://github.com/<GITHUB_OWNER>/mcp-gateway"
+readme = "README.md"
+keywords = ["mcp", "macos", "launchd", "supervisor", "developer-tools"]
+categories = ["command-line-utilities", "development-tools"]
+
+[workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.7", features = ["macros"] }
+clap = { version = "4", features = ["derive", "env"] }
+dirs = "5"
+futures = "0.3"
+libc = "0.2"
+parking_lot = "0.12"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+sysinfo = { version = "0.31", default-features = false, features = ["system"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tempfile = "3"
+thiserror = "1"
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+toml_edit = "0.22"
+tower = "0.5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+strip = "symbols"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"

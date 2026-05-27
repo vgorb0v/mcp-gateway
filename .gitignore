@@ -1,0 +1,32 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Local environment and install state
+.env
+.env.*
+!.env.example
+/.mcp-gateway/
+/run/
+/cache/
+/logs/
+/tmp/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Release artifacts
+/dist/
+*.tar.gz
+SHA256SUMS
+
+# Keep Cargo.lock committed for this binary application workspace.

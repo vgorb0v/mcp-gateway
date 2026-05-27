@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible MCP Gateway problem.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please remove secrets, tokens, cookies, and private paths before submitting.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Run ...
+        2. Configure ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste redacted `mcpgateway doctor`, `mcpgateway ps`, and relevant logs.
+      render: text
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "14.7"
+  - type: input
+    id: version
+    attributes:
+      label: MCP Gateway version or commit
+      placeholder: "v0.1.0 or git SHA"
