@@ -225,6 +225,23 @@ groups:
 }
 
 #[test]
+fn native_empty_core_config_renders_from_typed_defaults() {
+    let cfg = Config::native_empty_core();
+    assert!(cfg.servers.is_empty());
+    assert_eq!(cfg.groups["coding"].servers, Vec::<String>::new());
+    assert!(cfg.clients.managed_clients.is_empty());
+    assert_eq!(cfg.limits.max_clients, 128);
+    assert_eq!(cfg.limits.session_ttl_seconds, 300);
+
+    let rendered = mcp_gateway::config::render_native_empty_core_yaml().unwrap();
+    assert!(rendered.contains("servers: {}"), "{rendered}");
+    assert!(rendered.contains("managed_clients: []"), "{rendered}");
+    assert!(rendered.contains("max_clients: 128"), "{rendered}");
+    let round_trip = Config::load_str(&rendered).expect("native config round trips");
+    assert_eq!(round_trip, cfg);
+}
+
+#[test]
 fn zero_limits_are_rejected() {
     let err = Config::load_str(
         r#"
@@ -330,6 +347,53 @@ env:
         "docs-helper should be added to coding: {:?}",
         coding.servers
     );
+}
+
+#[test]
+fn servers_d_overlay_accepts_canonical_timeout_seconds_and_legacy_secs_aliases() {
+    let canonical = Config::load_str(
+        r#"
+servers:
+  builtin:
+    transport: stdio
+    command: "/bin/true"
+groups:
+  coding:
+    servers: ["builtin"]
+"#,
+    )
+    .unwrap();
+
+    let text = r#"
+id: canonical
+runtime:
+  command: pnpm
+  idle_timeout_seconds: 11
+  startup_timeout_seconds: 12
+  request_timeout_seconds: 13
+"#;
+    let overlay: mcp_gateway::config::ManagedServerOverlay =
+        serde_yaml::from_str(text).expect("canonical seconds parse");
+    let server = overlay.to_server_config().expect("server");
+    assert_eq!(server.idle_timeout_seconds, Some(11));
+    assert_eq!(server.startup_timeout_seconds, Some(12));
+    assert_eq!(server.request_timeout_seconds, Some(13));
+
+    let text = r#"
+id: legacy
+runtime:
+  command: pnpm
+  idle_timeout_secs: 21
+  startup_timeout_secs: 22
+  request_timeout_secs: 23
+"#;
+    let overlay: mcp_gateway::config::ManagedServerOverlay =
+        serde_yaml::from_str(text).expect("legacy secs parse");
+    let server = overlay.to_server_config().expect("server");
+    assert_eq!(server.idle_timeout_seconds, Some(21));
+    assert_eq!(server.startup_timeout_seconds, Some(22));
+    assert_eq!(server.request_timeout_seconds, Some(23));
+    assert!(canonical.validate().is_ok());
 }
 
 #[test]

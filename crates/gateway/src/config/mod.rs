@@ -1,12 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{GatewayError, Result};
+
+mod defaults;
+mod overlay;
+mod validate;
+
+pub use defaults::render_native_empty_core_yaml;
+pub use overlay::{ManagedServerOverlay, ManagedServerRuntime, ManagedServerSecret};
+pub use validate::validate_identifier;
+
+use validate::{expand_env_placeholders, reject_duplicate_keys, validate_loopback_listen_addr};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -235,124 +243,6 @@ impl LimitsConfig {
     }
 }
 
-/// Single-server YAML schema accepted in `~/.mcp-gateway/config/servers.d/`.
-/// Lives separately from `ServerConfig` so the overlay schema can grow
-/// without bleeding into the core validated config struct.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(default)]
-pub struct ManagedServerOverlay {
-    pub id: String,
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    #[serde(default)]
-    pub display_name: Option<String>,
-    #[serde(default)]
-    pub group_memberships: Vec<String>,
-    pub runtime: ManagedServerRuntime,
-    #[serde(default)]
-    pub env: BTreeMap<String, String>,
-    #[serde(default)]
-    pub secrets: Vec<ManagedServerSecret>,
-}
-
-impl Default for ManagedServerOverlay {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            enabled: true,
-            display_name: None,
-            group_memberships: Vec::new(),
-            runtime: ManagedServerRuntime::default(),
-            env: BTreeMap::new(),
-            secrets: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(default)]
-pub struct ManagedServerRuntime {
-    #[serde(default = "default_stdio_transport")]
-    pub transport: TransportKind,
-    pub command: String,
-    #[serde(default)]
-    pub args: Vec<String>,
-    #[serde(default)]
-    pub lazy: Option<bool>,
-    #[serde(default)]
-    pub idle_timeout_secs: Option<u64>,
-    #[serde(default)]
-    pub startup_timeout_secs: Option<u64>,
-    #[serde(default)]
-    pub request_timeout_secs: Option<u64>,
-    #[serde(default)]
-    pub restart_policy: Option<RestartPolicy>,
-    #[serde(default)]
-    pub path_allowlist: Vec<PathBuf>,
-    #[serde(default)]
-    pub dangerous: Option<bool>,
-    #[serde(default)]
-    pub singleton: Option<bool>,
-}
-
-impl Default for ManagedServerRuntime {
-    fn default() -> Self {
-        Self {
-            transport: TransportKind::Stdio,
-            command: String::new(),
-            args: Vec::new(),
-            lazy: None,
-            idle_timeout_secs: None,
-            startup_timeout_secs: None,
-            request_timeout_secs: None,
-            restart_policy: None,
-            path_allowlist: Vec::new(),
-            dangerous: None,
-            singleton: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct ManagedServerSecret {
-    pub name: String,
-    #[serde(default)]
-    pub required: bool,
-}
-
-impl ManagedServerOverlay {
-    pub fn to_server_config(&self) -> Result<ServerConfig> {
-        if self.runtime.command.trim().is_empty() {
-            return Err(GatewayError::Config(format!(
-                "managed server `{}` is missing runtime.command",
-                self.id
-            )));
-        }
-        Ok(ServerConfig {
-            transport: self.runtime.transport.clone(),
-            command: self.runtime.command.clone(),
-            args: self.runtime.args.clone(),
-            env: self.env.clone(),
-            lazy: self.runtime.lazy,
-            singleton: self.runtime.singleton,
-            dangerous: self.runtime.dangerous,
-            path_allowlist: self.runtime.path_allowlist.clone(),
-            idle_timeout_seconds: self.runtime.idle_timeout_secs,
-            startup_timeout_seconds: self.runtime.startup_timeout_secs,
-            request_timeout_seconds: self.runtime.request_timeout_secs,
-            restart_policy: self.runtime.restart_policy,
-        })
-    }
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_stdio_transport() -> TransportKind {
-    TransportKind::Stdio
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct MetricsConfig {
@@ -512,90 +402,4 @@ impl Config {
         }
         Ok(())
     }
-}
-
-pub fn validate_identifier(kind: &str, value: &str) -> Result<()> {
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return Err(GatewayError::Config(format!("{kind} id must not be empty")));
-    };
-    let valid = first.is_ascii_alphanumeric()
-        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_');
-    if !valid {
-        return Err(GatewayError::Config(format!(
-            "{kind} id '{value}' is not path-safe; use ASCII letters, digits, '-' or '_'"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_loopback_listen_addr(listen: &str) -> Result<()> {
-    let addr: SocketAddr = listen.parse().map_err(|err| {
-        GatewayError::Config(format!(
-            "listen address '{listen}' must be an IP socket address: {err}"
-        ))
-    })?;
-    if !addr.ip().is_loopback() {
-        return Err(GatewayError::Config(format!(
-            "listen address '{listen}' must be loopback-only; use 127.0.0.1 or ::1"
-        )));
-    }
-    Ok(())
-}
-
-fn expand_env_placeholders(text: &str) -> Result<String> {
-    let re = Regex::new(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}").expect("valid env regex");
-    let mut out = String::with_capacity(text.len());
-    let mut last = 0;
-    for caps in re.captures_iter(text) {
-        let m = caps.get(0).expect("whole match");
-        out.push_str(&text[last..m.start()]);
-        let key = &caps[1];
-        let value = std::env::var(key).map_err(|_| {
-            GatewayError::Config(format!(
-                "environment variable '{key}' is required by config"
-            ))
-        })?;
-        out.push_str(&value);
-        last = m.end();
-    }
-    out.push_str(&text[last..]);
-    Ok(out)
-}
-
-fn reject_duplicate_keys(text: &str, section: &str) -> Result<()> {
-    let mut in_section = false;
-    let mut section_indent = 0usize;
-    let mut seen = BTreeSet::new();
-
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let indent = line.len() - line.trim_start().len();
-        if !in_section {
-            if trimmed == format!("{section}:") {
-                in_section = true;
-                section_indent = indent;
-            }
-            continue;
-        }
-        if indent <= section_indent {
-            break;
-        }
-        if indent == section_indent + 2 && trimmed.ends_with(':') {
-            let key = trimmed
-                .trim_end_matches(':')
-                .trim_matches('"')
-                .trim_matches('\'');
-            if !seen.insert(key.to_string()) {
-                return Err(GatewayError::Config(format!(
-                    "duplicate {section} entry '{key}'"
-                )));
-            }
-        }
-    }
-
-    Ok(())
 }

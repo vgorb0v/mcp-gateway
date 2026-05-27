@@ -76,6 +76,114 @@ async fn ps_prints_table_with_rss_column() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn ps_prints_json_when_requested() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+
+    let app = Router::new().route(
+        "/servers",
+        get(|| async {
+            Json(json!({
+                "servers": [
+                    { "name": "browser-tools", "state": "running",
+                      "pid": 1432, "uptime_seconds": 754, "rss_kb": 186368,
+                      "initialized": true, "last_error": null,
+                      "last_used_seconds": 12, "active_requests": 1, "pending_requests": 2 }
+                ]
+            }))
+        }),
+    );
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let bin = env!("CARGO_BIN_EXE_mcpgateway");
+    let state_dir = tempfile::tempdir().expect("state dir");
+    let state_file = state_dir.path().join("state.json");
+    fs::write(
+        &state_file,
+        serde_json::json!({
+            "base_url": format!("http://{addr}"),
+            "pid": 12345_u32
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let output = Command::new(bin)
+        .args([
+            "ps",
+            "--format",
+            "json",
+            "--state-file",
+            state_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run mcpgateway ps --format json");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(parsed["servers"][0]["name"], "browser-tools");
+    assert_eq!(parsed["servers"][0]["active_requests"], 1);
+}
+
+#[test]
+fn help_includes_examples_aliases_and_command_descriptions() {
+    let bin = env!("CARGO_BIN_EXE_mcpgateway");
+    let help = Command::new(bin)
+        .arg("--help")
+        .output()
+        .expect("run top-level help");
+    assert!(help.status.success());
+    let stdout = String::from_utf8_lossy(&help.stdout);
+    assert!(stdout.contains("Examples:"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("Apply generated gateway shims"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("Install or refresh native"),
+        "stdout: {stdout}"
+    );
+
+    let install_help = Command::new(bin)
+        .args(["add", "--help"])
+        .output()
+        .expect("run add alias help");
+    assert!(install_help.status.success());
+    let stdout = String::from_utf8_lossy(&install_help.stdout);
+    assert!(
+        stdout.contains("Install a pnpm package"),
+        "stdout: {stdout}"
+    );
+
+    let status_help = Command::new(bin)
+        .args(["status", "--help"])
+        .output()
+        .expect("run status alias help");
+    assert!(status_help.status.success());
+    let stdout = String::from_utf8_lossy(&status_help.stdout);
+    assert!(stdout.contains("--format <FORMAT>"), "stdout: {stdout}");
+}
+
+#[test]
+fn demo_help_documents_proof_path() {
+    let bin = env!("CARGO_BIN_EXE_mcpgateway");
+    let output = Command::new(bin)
+        .args(["demo", "--help"])
+        .output()
+        .expect("run demo help");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("90-second"), "stdout: {stdout}");
+    assert!(stdout.contains("--keep"), "stdout: {stdout}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn stop_posts_to_named_server_stop_route() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr: SocketAddr = listener.local_addr().unwrap();

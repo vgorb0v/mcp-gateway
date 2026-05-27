@@ -1,7 +1,8 @@
 [package]
 name = "mcp-gateway-bridge"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Per-server stdio bridge for MCP Gateway"
 homepage.workspace = true
@@ -10,6 +11,9 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 publish = false
+
+[lints]
+workspace = true
 
 [[bin]]
 name = "mcp-gateway-bridge"

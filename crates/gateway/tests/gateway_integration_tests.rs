@@ -18,7 +18,19 @@ use serde_json::json;
 use tower::ServiceExt;
 
 fn fake_command() -> String {
-    env!("CARGO_BIN_EXE_fake_mcp_server").to_string()
+    if let Some(path) = option_env!("CARGO_BIN_EXE_fake-mcp-server") {
+        return path.to_string();
+    }
+    let mut target_dir = std::env::current_exe().expect("current test executable");
+    target_dir.pop();
+    if target_dir.file_name().and_then(|name| name.to_str()) == Some("deps") {
+        target_dir.pop();
+    }
+    let mut example = target_dir.join("examples/fake-mcp-server");
+    if cfg!(windows) {
+        example.set_extension("exe");
+    }
+    example.to_string_lossy().to_string()
 }
 
 fn test_config() -> Config {

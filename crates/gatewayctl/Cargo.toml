@@ -1,7 +1,8 @@
 [package]
 name = "mcpgateway"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Installer and status CLI for MCP Gateway"
 homepage.workspace = true
@@ -10,6 +11,9 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 publish = false
+
+[lints]
+workspace = true
 
 [[bin]]
 name = "mcpgateway"
@@ -24,6 +28,7 @@ mcp-gateway-core = { path = "../gateway" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 tokio.workspace = true
 toml_edit.workspace = true
 tracing.workspace = true

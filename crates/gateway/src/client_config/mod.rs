@@ -180,7 +180,7 @@ pub(super) fn make_executable(_path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn client_path(client: ClientKind, home: &Path) -> PathBuf {
+pub fn client_path(client: ClientKind, home: &Path) -> PathBuf {
     match client {
         ClientKind::Codex => home.join(".codex/config.toml"),
         ClientKind::ClaudeCode => home.join(".claude.json"),

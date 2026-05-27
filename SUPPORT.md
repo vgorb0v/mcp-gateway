@@ -1,6 +1,6 @@
 # Support
 
-MCP Gateway is an open-source macOS developer tool. Community support happens through GitHub issues and discussions once the repository is public.
+MCP Gateway is an open-source macOS developer tool. Community support happens through GitHub issues and discussions.
 
 ## Supported
 

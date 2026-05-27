@@ -1,14 +1,104 @@
 # MCP Gateway
 
-MCP Gateway is a lightweight, host-native Rust supervisor for MCP servers on macOS. It runs as a user LaunchAgent, keeps one private loopback-only HTTP control plane, exposes each configured backend through its own stdio shim in `~/.mcp-gateway/mcps/<server>`, lazy-starts backends only when tools are called, and stops idle backends after 20 minutes by default.
+MCP Gateway is a lightweight, host-native macOS supervisor for MCP servers. It runs as a user LaunchAgent, keeps a private loopback-only control plane, exposes each configured backend through a per-server stdio shim in `~/.mcp-gateway/mcps/<server>`, serves discovery from a cache, and lazy-starts backends only for real tool calls.
 
-## Why MCP Gateway?
+Fresh installs are empty-core: no default MCP servers, no default managed AI clients, no API keys, and no browser sessions.
 
-- Avoid one MCP backend process per AI client process.
-- Lazy-start backend servers when agents actually call tools.
-- Keep the daemon control plane private on `127.0.0.1` or `::1`.
-- Generate per-server shims for supported clients instead of exposing a visible parent `mcp-gateway` MCP.
-- Serve `initialize`, `tools/list`, `prompts/list`, and `resources/list` from a capability cache so agent startup does not start every backend.
+## Install
+
+### GitHub Release
+
+Download the archive for your Mac from [GitHub Releases](https://github.com/vgorb0v/mcp-gateway/releases), then install the binaries:
+
+```bash
+tar -xzf mcp-gateway-vX.Y.Z-aarch64-apple-darwin.tar.gz
+cd mcp-gateway-vX.Y.Z-aarch64-apple-darwin
+./mcpgateway install-native
+```
+
+Use the `x86_64-apple-darwin` archive on Intel Macs. The installer writes binaries and shims under `~/.mcp-gateway/` and the user LaunchAgent at:
+
+```text
+~/Library/LaunchAgents/io.github.mcpgateway.daemon.plist
+```
+
+### Homebrew
+
+A Homebrew tap is planned but not published yet.
+
+### Build From Source
+
+```bash
+cargo build --release --workspace --bins
+target/release/mcpgateway install-native
+```
+
+## 90-Second Demo
+
+Run a self-contained proof path without adding real MCP packages or touching launchctl:
+
+```bash
+mcpgateway demo
+```
+
+From a source checkout:
+
+```bash
+make demo
+```
+
+The demo uses a temporary home, installs the local binaries with `--skip-launchctl`, writes a temporary `demo-tools` overlay, refreshes cached capabilities, starts the daemon directly, and exercises `initialize`, `tools/list`, and `tools/call` through the generated shim.
+
+Use `mcpgateway demo --keep` to keep the temporary files for inspection.
+
+## First Real Server
+
+Install a package you trust, then refresh capabilities:
+
+```bash
+mcpgateway add @modelcontextprotocol/server-filesystem --name filesystem --arg="$HOME/Documents"
+mcpgateway refresh all
+mcpgateway ps
+```
+
+`mcpgateway add` is an alias for `mcpgateway install`. It writes a single-server overlay under `~/.mcp-gateway/config/servers.d/` and does not make the server available to clients until you apply or manage client configs.
+
+## Client Integration
+
+Client configs point to:
+
+```text
+~/.mcp-gateway/mcps/<server>
+```
+
+The shim calls `mcp-gateway-bridge`, which reads `~/.mcp-gateway/run/state.json`; client configs do not hard-code daemon ports and do not add a visible aggregate `mcp-gateway` MCP entry.
+
+```bash
+mcpgateway import-clients --write
+mcpgateway apply-configs --clients codex,claude-code
+mcpgateway doctor
+```
+
+Supported adapters are optional conveniences: Codex, Claude Code, Claude Desktop, VS Code, and Antigravity.
+
+## Troubleshooting
+
+```bash
+mcpgateway doctor
+mcpgateway status
+mcpgateway stop <server>
+mcpgateway stop all
+mcpgateway refresh all
+```
+
+- Gateway not running: inspect `mcpgateway doctor`, then rerun `mcpgateway install-native`.
+- Capability cache missing or stale: run `mcpgateway refresh all`.
+- Client cannot find a shim: rerun `mcpgateway apply-configs --clients <client>` and verify the shim exists.
+- Browser MCP server using the wrong browser: stop it immediately and reprovision Chrome for Testing explicitly with `mcpgateway install-native --provision chrome-for-testing`.
+
+More detail is in [docs/troubleshooting.md](docs/troubleshooting.md).
+
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -21,101 +111,35 @@ flowchart LR
   Launchd["launchd user agent"] --> Daemon
 ```
 
-## Binaries
+The binaries are:
 
-- `mcp-gateway`: the local supervisor daemon.
-- `mcp-gateway-bridge`: the stdio bridge executed by each per-server shim.
-- `mcpgateway`: installer, config helper, capability refresher, doctor, and status CLI.
+- `mcp-gateway`: local supervisor daemon.
+- `mcp-gateway-bridge`: per-server stdio bridge executed by shims.
+- `mcpgateway`: installer, config helper, capability refresher, doctor, status, and demo CLI.
 
-## Requirements
+Configuration lives at `~/.mcp-gateway/config/gateway.yaml`; user-installed server overlays live in `~/.mcp-gateway/config/servers.d/*.yaml`.
 
-- macOS. The daemon is intentionally a host-native user service, not a Docker-first or cross-platform daemon.
-- A stable Rust toolchain for source builds.
-- `pnpm` or `npx` only when installing Node-backed MCP servers or provisioning Chrome for Testing.
-
-## Install From Source
-
-```bash
-cargo build --release --workspace --bins
-target/release/mcpgateway install-native
-```
-
-Fresh installs are empty-core: no default MCP servers, no default managed AI clients, no API keys, and no browser sessions. The installer writes the neutral LaunchAgent at:
-
-```text
-~/Library/LaunchAgents/io.github.mcpgateway.daemon.plist
-```
-
-It preserves existing user config and migrates the old private label best-effort if present.
-
-## First Server Quickstart
-
-The package below is a fake example. Replace it with an MCP package you trust.
-
-```bash
-mcpgateway install @example/fake-mcp-server --name example-tools --arg=--stdio
-mcpgateway import-clients --write
-mcpgateway apply-configs --clients codex,claude-code
-mcpgateway refresh-capabilities all
-mcpgateway ps
-```
-
-Client configs point to `~/.mcp-gateway/mcps/example-tools`. They do not hard-code the daemon port, and they do not add a visible aggregate `mcp-gateway` MCP entry.
-
-## Configuration
-
-Primary config lives at `~/.mcp-gateway/config/gateway.yaml`. User-installed server overlays live in `~/.mcp-gateway/config/servers.d/*.yaml`.
-
-Important paths:
-
-- `~/.mcp-gateway/bin/`: installed Rust binaries.
-- `~/.mcp-gateway/mcps/<server>`: executable per-server shims.
-- `~/.mcp-gateway/run/state.json`: owner-only state file containing the hidden daemon URL.
-- `~/.mcp-gateway/env`: owner-only environment file for values referenced by config.
-- `~/.mcp-gateway/cache/mcp_manifest_cache.json`: cached tools, prompts, and resources.
-- `~/.mcp-gateway/logs/`: daemon stdout/stderr logs from launchd.
-
-Configuration supports stdio backends, groups, managed clients, environment expansion with `${NAME}`, backend timeouts, message limits, `lazy`, `singleton`, and `dangerous` flags. See [docs/configuration.md](docs/configuration.md).
-
-## Safety Model
-
-- The daemon refuses non-loopback listen addresses by default.
-- Browser-originated requests from non-local origins are rejected; CLI and bridge requests without `Origin` are allowed.
-- `state.json` and `env` are written owner-only because they can expose private local state or secrets.
-- Backend logs exposed through `/logs/{server}` are redacted for common secret patterns and configured secret values.
-- `dangerous: true` marks backends that can inspect or mutate sensitive local state; it is not a sandbox.
-- Browser MCP servers are opt-in. They must not default to the user's regular Chrome profile; Chrome for Testing provisioning is explicit.
-
-## Common Commands
-
-```bash
-mcpgateway doctor
-mcpgateway ps
-mcpgateway stop example-tools
-mcpgateway stop all
-mcpgateway refresh-capabilities all
-```
-
-## Troubleshooting
-
-- Gateway not running: run `mcpgateway doctor`, inspect `launchctl print gui/$UID/io.github.mcpgateway.daemon`, then rerun `mcpgateway install-native`.
-- `pnpm` missing: install it only if you are adding Node-backed MCP servers.
-- Capability cache missing: run `mcpgateway refresh-capabilities all`.
-- Client cannot find a shim: rerun `mcpgateway apply-configs --clients <client>` and verify `~/.mcp-gateway/mcps/<server>` exists.
-- Stale launchd service: rerun `mcpgateway install-native`, which unloads the old label best-effort and writes the neutral label.
-
-More detail is in [docs/troubleshooting.md](docs/troubleshooting.md).
+See [docs/architecture.md](docs/architecture.md), [docs/configuration.md](docs/configuration.md), and [docs/security.md](docs/security.md).
 
 ## Development
 
 ```bash
-cargo fmt --all
+make check
+make smoke
+make demo
+make ci
+```
+
+Useful one-offs:
+
+```bash
+cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --release --workspace --bins
 ```
 
-The workspace is GitHub-release-only for now. Crates are marked `publish = false` until the crates.io packaging strategy is intentionally revisited.
+The project is GitHub-release-only for now. Crates are marked `publish = false` until the crates.io packaging strategy is intentionally revisited.
 
 ## Limitations
 
@@ -123,12 +147,3 @@ The workspace is GitHub-release-only for now. Crates are marked `publish = false
 - Backend support is stdio-focused today.
 - Release binaries are not signed or notarized yet.
 - No default MCP servers or managed AI clients are installed.
-
-## Documentation
-
-- [Architecture](docs/architecture.md)
-- [Configuration](docs/configuration.md)
-- [Client integrations](docs/client-integrations.md)
-- [Security](docs/security.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Release process](docs/release.md)

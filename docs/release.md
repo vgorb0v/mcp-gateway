@@ -2,7 +2,7 @@
 
 MCP Gateway currently publishes GitHub release artifacts only. Crates are marked `publish = false` until a crates.io strategy is explicitly chosen.
 
-The repository pins the stable Rust channel in `rust-toolchain.toml`. A numeric MSRV is not declared yet; add one only after verifying that exact toolchain in CI.
+The repository pins Rust `1.95.0` in `rust-toolchain.toml`, workspace package metadata, and CI. Treat that as the current MSRV until intentionally changed.
 
 ## Pre-release Checklist
 
@@ -12,18 +12,14 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --release --workspace --bins
 scripts/smoke-test.sh
+target/release/mcpgateway demo
 ```
 
 Also run the publication blocker scan from the PR checklist and investigate any non-migration matches.
 
 ## Version Bump
 
-Update versions in:
-
-- `crates/gateway/Cargo.toml`
-- `crates/bridge/Cargo.toml`
-- `crates/gatewayctl/Cargo.toml`
-- `CHANGELOG.md`
+Update the workspace version in `Cargo.toml` and document the release in `CHANGELOG.md`.
 
 ## Tagging
 
