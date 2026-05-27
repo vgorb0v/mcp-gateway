@@ -33,7 +33,7 @@ If the old private label exists, reinstalling unloads and removes its plist best
 mcpgateway refresh-capabilities all
 ```
 
-List methods do not start real backends as a fallback. Missing cache entries return an MCP error asking for a refresh.
+List methods do not start real backends as a fallback. Missing cache entries return an MCP error asking for a refresh. Capability refresh also reloads a running gateway service on macOS so the daemon picks up new files under `~/.mcp-gateway/config/servers.d/` and the refreshed cache.
 
 ## Client Cannot Find Shim
 

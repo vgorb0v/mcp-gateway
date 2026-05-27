@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -24,6 +24,8 @@ mod output;
 use cmd::demo::{run_demo, run_demo_server, DemoOptions};
 use cmd::status::{run_ps, run_stop};
 use output::OutputFormat;
+
+const HOMEBREW_LAUNCH_AGENT_LABEL: &str = "homebrew.mxcl.mcp-gateway";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -288,6 +290,9 @@ pub fn run() -> Result<()> {
             println!(
                 "Run `mcpgateway refresh-capabilities {}` when the server is configured and ready.",
                 installed.server_id
+            );
+            println!(
+                "Capability refresh reloads a running gateway service so clients see updates."
             );
         }
         Commands::Demo { home, keep } => run_demo(DemoOptions { home, keep })?,
@@ -1171,7 +1176,54 @@ pub(crate) fn run_refresh_capabilities(
     refresh_capabilities_in_process(&cfg, &refresh_paths, &group, &target)?;
     sync_managed_client_configs(&cfg, &paths, &home, &group)?;
     println!("Refreshed capabilities for {target}");
+    if let Some(label) = reload_gateway_after_config_change(&paths)? {
+        println!("Reloaded running gateway service ({label})");
+    }
     Ok(())
+}
+
+fn reload_gateway_after_config_change(paths: &NativeInstallPaths) -> Result<Option<String>> {
+    if !cfg!(target_os = "macos") {
+        return Ok(None);
+    }
+    reload_gateway_after_config_change_with_runner(paths, run_command_status)
+}
+
+fn reload_gateway_after_config_change_with_runner<F>(
+    paths: &NativeInstallPaths,
+    mut runner: F,
+) -> Result<Option<String>>
+where
+    F: FnMut(&str, &[String]) -> Result<bool>,
+{
+    if !paths.state_file.exists() {
+        return Ok(None);
+    }
+    for label in [HOMEBREW_LAUNCH_AGENT_LABEL, LAUNCH_AGENT_LABEL] {
+        let service = format!("gui/{}/{}", current_uid(), label);
+        if !runner("launchctl", &["print".to_string(), service.clone()])? {
+            continue;
+        }
+        let restarted = runner(
+            "launchctl",
+            &["kickstart".to_string(), "-k".to_string(), service.clone()],
+        )?;
+        if !restarted {
+            anyhow::bail!("failed to reload gateway service {service}");
+        }
+        return Ok(Some(label.to_string()));
+    }
+    Ok(None)
+}
+
+fn run_command_status(program: &str, args: &[String]) -> Result<bool> {
+    let status = Command::new(program)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .with_context(|| format!("failed to run {program} {}", args.join(" ")))?;
+    Ok(status.success())
 }
 
 fn refresh_capabilities_in_process(
@@ -2036,6 +2088,68 @@ CHROME_REMOTE_DEBUGGING_URL=http://old-debug-url
         assert!(overlay.contains("    - \"stdio\"\n"));
         assert!(overlay.contains("  - coding\n"));
         assert!(overlay.contains("Installed from @scope/server-example@latest"));
+    }
+
+    #[test]
+    fn config_reload_prefers_homebrew_service_before_manual_launch_agent() {
+        let home = tempfile::tempdir().expect("home");
+        let paths = mcp_gateway::native::NativeInstallPaths::for_home(home.path());
+        std::fs::create_dir_all(paths.state_file.parent().unwrap()).unwrap();
+        std::fs::write(&paths.state_file, "{}").unwrap();
+        let mut commands = Vec::new();
+
+        let reloaded =
+            super::reload_gateway_after_config_change_with_runner(&paths, |program, args| {
+                commands.push(format!("{program} {}", args.join(" ")));
+                Ok(true)
+            })
+            .expect("reload check");
+
+        assert_eq!(reloaded, Some("homebrew.mxcl.mcp-gateway".to_string()));
+        let uid = super::current_uid();
+        assert_eq!(
+            commands,
+            vec![
+                format!("launchctl print gui/{uid}/homebrew.mxcl.mcp-gateway"),
+                format!("launchctl kickstart -k gui/{uid}/homebrew.mxcl.mcp-gateway"),
+            ]
+        );
+    }
+
+    #[test]
+    fn config_reload_falls_back_to_manual_launch_agent_label() {
+        let home = tempfile::tempdir().expect("home");
+        let paths = mcp_gateway::native::NativeInstallPaths::for_home(home.path());
+        std::fs::create_dir_all(paths.state_file.parent().unwrap()).unwrap();
+        std::fs::write(&paths.state_file, "{}").unwrap();
+
+        let reloaded = super::reload_gateway_after_config_change_with_runner(&paths, |_, args| {
+            Ok(args
+                .last()
+                .is_some_and(|service| service.ends_with(mcp_gateway::native::LAUNCH_AGENT_LABEL)))
+        })
+        .expect("reload check");
+
+        assert_eq!(
+            reloaded,
+            Some(mcp_gateway::native::LAUNCH_AGENT_LABEL.to_string())
+        );
+    }
+
+    #[test]
+    fn config_reload_is_skipped_when_gateway_has_no_state_file() {
+        let home = tempfile::tempdir().expect("home");
+        let paths = mcp_gateway::native::NativeInstallPaths::for_home(home.path());
+        let mut called = false;
+
+        let reloaded = super::reload_gateway_after_config_change_with_runner(&paths, |_, _| {
+            called = true;
+            Ok(true)
+        })
+        .expect("reload check");
+
+        assert_eq!(reloaded, None);
+        assert!(!called);
     }
 
     #[test]

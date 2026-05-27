@@ -68,7 +68,7 @@ mcpgateway refresh all
 mcpgateway ps
 ```
 
-`mcpgateway add` writes a single-server overlay under `~/.mcp-gateway/config/servers.d/` and does not make the server available to clients until you apply or manage client configs.
+`mcpgateway add` writes a single-server overlay under `~/.mcp-gateway/config/servers.d/`. `mcpgateway refresh all` rebuilds the capability cache and reloads a running gateway service so clients see the new server.
 
 ## Client Integration
 
