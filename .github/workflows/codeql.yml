@@ -16,11 +16,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - uses: github/codeql-action/init@03e4368ac7daa2bd82b3e85262f3bf87ee112f57
+      - uses: github/codeql-action/init@87557b9c84dde89fdd9b10e88954ac2f4248e463
         with:
           languages: rust
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: 1.95.0
       - run: cargo build --workspace --bins
-      - uses: github/codeql-action/analyze@03e4368ac7daa2bd82b3e85262f3bf87ee112f57
+      - uses: github/codeql-action/analyze@87557b9c84dde89fdd9b10e88954ac2f4248e463
