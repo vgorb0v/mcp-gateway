@@ -32,7 +32,7 @@ jobs:
           echo "TAG=${tag}" >> "$GITHUB_ENV"
           echo "VERSION=${version}" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           path: source
 
@@ -54,7 +54,7 @@ jobs:
             --dir dist
           sha256sum dist/*.tar.gz | sort -k2 > dist/SHA256SUMS
 
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           repository: ${{ env.TAP_REPOSITORY }}
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
